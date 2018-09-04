@@ -1,0 +1,119 @@
+version: "3"
+
+networks:
+  proxy:
+    external: true
+  internal:
+    external: false
+
+volumes:
+  nextcloud:
+  apps:
+  data:
+  config:
+  mysqldir:
+
+services:
+  traefik:
+    image: traefik:1.4.4-alpine
+    command: --docker
+    container_name: traefik
+    hostname: traefik
+    labels:
+      - traefik.frontend.rule=Host:monitor.xanderle.me
+      - traefik.port=8080
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/xanderle/traefik/acme.json:/acme.json
+      - /home/xanderle/traefik/traefik.toml:/traefik.toml
+      - /home/xanderle/traefik/cert.pem:/traefik.crt
+      - /home/xanderle/traefik/private-key.pem:/traefik.key
+    networks:
+      - proxy
+    ports:
+      - 80:80
+      - 443:443
+
+  bitwarden:
+          image: mprasil/bitwarden
+          restart: always
+          volumes:
+                  - /Docker/bitwarden:/data
+          labels:
+                - traefik.backend=bitwarden
+                - traefik.frontend.rule=Host:bitwarden.xanderle.me
+                - traefik.docker.network=proxy
+                - traefik.port=80
+          networks:
+                - internal
+                - proxy
+  nextcloud:
+    image: nextcloud
+    environment:
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=root
+    links:
+      - mysql
+    restart: always
+    volumes:
+      - nextcloud:/var/www/html
+      - apps:/var/www/html/custom_apps
+      - data:/var/www/html/data
+      - config:/var/www/html/config
+    labels:
+      - traefik.backend=nextcloud
+      - traefik.frontend.rule=Host:nextcloud.xanderle.me
+      - traefik.docker.network=proxy
+      - traefik.port=80
+    networks:
+      - internal
+      - proxy
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mariadb:latest
+    environment:
+      MYSQL_ROOT_PASSWORD:
+    restart: always
+    volumes:
+      - mysqldir:/var/lib/mysql
+    networks:
+      - internal
+    labels:
+      - traefik.enable=false
+ 
+  adminer:
+    image: adminer:4.3.1-standalone
+    labels:
+      - traefik.backend=adminer
+      - traefik.frontend.rule=Host:db-admin.xanderle.me
+      - traefik.docker.network=proxy
+      - traefik.port=8080
+    networks:
+      - internal
+      - proxy
+    depends_on:
+      - mysql
+
+  plex:
+     image: binhex/arch-plexpass
+     labels:
+          - traefik.backend=plex
+          - traefik.frontend.rule=Host:plex.xanderle.me
+          - traefik.docker.network=proxy
+          - traefik.port=32400
+     networks:
+          - internal
+          - proxy
+     volumes:
+          - /mnt/2TB/Movies:/media
+          - $PWD/.rxstream/apps_persistent/plex:/config
+          - /etc/localtime:/etc/localtime:ro
+     environment:
+          - UMASK=000
+          - PUID=$PUID
+          - PGID=$PGID
+     ports:
+          - 127.0.0.1:32400:32400
